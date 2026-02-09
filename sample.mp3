@@ -1,0 +1,2 @@
+Sample audio file content for testing file existence check.
+This is not a real audio file, so Whisper will fail, but the file read step should pass.
