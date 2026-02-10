@@ -94,59 +94,85 @@ export async function reduceNoise(inputPath: string): Promise<string> {
  * Transcribe audio using local Whisper CLI
  * Requires 'whisper' to be in system PATH
  */
+// ... inside src/lib/audio-processor.ts
+
 export async function transcribeAudio(
     audioPath: string,
-    languageCode: string = 'hi' // Default to Hindi for now, but Whisper auto-detects
+    languageCode: string = 'hi'
 ): Promise<string> {
-    console.log(`🎙️ Transcribing audio locally (${languageCode})...`);
+    // 1. Setup Paths
+    const absolutePath = path.resolve(audioPath);
+    const outputDir = path.dirname(absolutePath);
+    const fileName = path.basename(absolutePath);
+    const fileNameNoExt = path.parse(absolutePath).name;
+
+    console.log(`🎙️ Transcribing: ${fileName}`);
+
+    // 2. PRE-CLEANUP: Delete potential old output files to prevent "Skipping"
+    const potentialFiles = [
+        path.join(outputDir, `${fileNameNoExt}.json`),
+        path.join(outputDir, `${fileName}.json`),
+        path.join(outputDir, `${fileNameNoExt}.wav.json`)
+    ];
+
+    potentialFiles.forEach(f => {
+        if (fs.existsSync(f)) {
+            try { fs.unlinkSync(f); } catch (e) { /* ignore */ }
+        }
+    });
 
     return new Promise((resolve, reject) => {
-        // Construct Whisper command
-        // --model medium: Good balance of speed/accuracy
-        // --task translate: Translate to English
-        // --output_format json: Easy to parse
-        const command = `whisper "${audioPath}" --model medium --task translate --output_format json --verbose False`;
+        // 3. Command: Added --language to force translation if needed
+        const command = `whisper "${absolutePath}" --model medium --language ${languageCode === 'hi-IN' ? 'hi' : 'en'} --task translate --output_format json --output_dir "${outputDir}" --verbose False`;
 
-        console.log(`   Command: ${command}`);
+        console.log(`🚀 Executing: ${command}`);
+
+        // 0. Inject FFmpeg Path
+        const ffmpegPath = getFFmpegPath();
+        const ffmpegDir = path.dirname(ffmpegPath);
+
+        // Append FFmpeg directory to existing PATH
+        const env = {
+            ...process.env,
+            PATH: `${ffmpegDir}${path.delimiter}${process.env.PATH}`
+        };
 
         import('child_process').then(({ exec }) => {
-            exec(command, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+            exec(command, {
+                maxBuffer: 1024 * 1024 * 10,
+                env: env // Pass the modified environment
+            }, (error, stdout, stderr) => {
                 if (error) {
-                    console.error('❌ Whisper CLI error:', error.message);
-                    reject(error);
-                    return;
+                    console.error('❌ Whisper CLI Error:', error.message);
+                    // Don't reject yet, sometimes it writes the file anyway
+                }
+
+                // 4. Find the new file
+                let foundFile = null;
+                for (const p of potentialFiles) {
+                    if (fs.existsSync(p)) {
+                        foundFile = p;
+                        break;
+                    }
                 }
 
                 try {
-                    // Whisper outputs JSON to a file or stdout? 
-                    // CLI usually saves to file. Let's check if we can read the JSON file.
-                    // The --output_format json flage saves a .json file
-                    const jsonPath = audioPath + '.json';
-
-                    if (fs.existsSync(jsonPath)) {
-                        const jsonContent = fs.readFileSync(jsonPath, 'utf-8');
+                    if (foundFile) {
+                        const jsonContent = fs.readFileSync(foundFile, 'utf-8');
+                        fs.unlinkSync(foundFile); // Cleanup
                         const result = JSON.parse(jsonContent);
-
-                        // Cleanup json file
-                        fs.unlinkSync(jsonPath);
-
-                        // Also cleanup other formats if generated (txt, srt, etc if default)
-                        // But we specified only json. 
-                        // Note: Whisper CLI might generate other files depending on version.
-
-                        const transcript = result.text || '';
-                        console.log('✅ Transcription complete');
-                        resolve(transcript.trim());
+                        resolve(result.text.trim());
                     } else {
-                        // Fallback: try to parse stdout if file not found (some versions output to stdout)
-                        // But usually it writes to file.
-                        console.warn('⚠️ JSON file not found, checking stdout...');
-                        resolve(stdout.trim());
+                        // Fallback: Check stdout, but filter out "Skipping" messages
+                        const cleanStdout = stdout.trim();
+                        if (cleanStdout && !cleanStdout.startsWith("Skipping")) {
+                            resolve(cleanStdout);
+                        } else {
+                            throw new Error("Whisper skipped processing or failed to generate output.");
+                        }
                     }
-
-                } catch (parseError) {
-                    console.error('❌ Failed to parse transcript:', parseError);
-                    reject(parseError);
+                } catch (err: any) {
+                    reject(err);
                 }
             });
         });
