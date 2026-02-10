@@ -20,7 +20,7 @@ const getFFmpegPath = () => {
     }
     // For production/Linux (Vercel, Render, etc.)
     // These environments usually have ffmpeg pre-installed in the path
-    return 'ffmpeg'; 
+    return 'ffmpeg';
 };
 
 // Set the path explicitly to bypass the library's internal auto-discovery logic
@@ -91,73 +91,66 @@ export async function reduceNoise(inputPath: string): Promise<string> {
 }
 
 /**
- * Transcribe audio using Hugging Face Inference API
+ * Transcribe audio using local Whisper CLI
+ * Requires 'whisper' to be in system PATH
  */
 export async function transcribeAudio(
     audioPath: string,
-    languageCode: string = 'hi-IN'
+    languageCode: string = 'hi' // Default to Hindi for now, but Whisper auto-detects
 ): Promise<string> {
-    console.log(`🎙️ Transcribing audio (${languageCode})...`);
+    console.log(`🎙️ Transcribing audio locally (${languageCode})...`);
 
-    try {
-        const HF_TOKEN = process.env.HUGGINGFACE_API_TOKEN;
+    return new Promise((resolve, reject) => {
+        // Construct Whisper command
+        // --model medium: Good balance of speed/accuracy
+        // --task translate: Translate to English
+        // --output_format json: Easy to parse
+        const command = `whisper "${audioPath}" --model medium --task translate --output_format json --verbose False`;
 
-        if (!HF_TOKEN) {
-            throw new Error('HUGGINGFACE_API_TOKEN not found in environment variables.');
-        }
+        console.log(`   Command: ${command}`);
 
-        const modelMap: Record<string, string> = {
-            'hi-IN': 'ai4bharat/whisper-medium-hi',
-            'ta-IN': 'ai4bharat/whisper-medium-ta',
-            'te-IN': 'ai4bharat/whisper-medium-te',
-            'en-IN': 'openai/whisper-large-v3',
-            'bn-IN': 'openai/whisper-large-v3',
-            'mr-IN': 'openai/whisper-large-v3',
-            'gu-IN': 'openai/whisper-large-v3',
-        };
+        import('child_process').then(({ exec }) => {
+            exec(command, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+                if (error) {
+                    console.error('❌ Whisper CLI error:', error.message);
+                    reject(error);
+                    return;
+                }
 
-        const model = modelMap[languageCode] || 'openai/whisper-large-v3';
-        console.log(`   Using model: ${model}`);
+                try {
+                    // Whisper outputs JSON to a file or stdout? 
+                    // CLI usually saves to file. Let's check if we can read the JSON file.
+                    // The --output_format json flage saves a .json file
+                    const jsonPath = audioPath + '.json';
 
-        const audioBuffer = fs.readFileSync(audioPath);
+                    if (fs.existsSync(jsonPath)) {
+                        const jsonContent = fs.readFileSync(jsonPath, 'utf-8');
+                        const result = JSON.parse(jsonContent);
 
-        const response = await fetch(
-            `https://api-inference.huggingface.co/models/${model}`,
-            {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${HF_TOKEN}` },
-                body: audioBuffer,
-            }
-        );
+                        // Cleanup json file
+                        fs.unlinkSync(jsonPath);
 
-        if (!response.ok) {
-            if (response.status === 503) {
-                console.log('⏳ Model is loading, retrying in 20 seconds...');
-                await new Promise(resolve => setTimeout(resolve, 20000));
-                
-                const retryResponse = await fetch(
-                    `https://api-inference.huggingface.co/models/${model}`,
-                    {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${HF_TOKEN}` },
-                        body: audioBuffer,
+                        // Also cleanup other formats if generated (txt, srt, etc if default)
+                        // But we specified only json. 
+                        // Note: Whisper CLI might generate other files depending on version.
+
+                        const transcript = result.text || '';
+                        console.log('✅ Transcription complete');
+                        resolve(transcript.trim());
+                    } else {
+                        // Fallback: try to parse stdout if file not found (some versions output to stdout)
+                        // But usually it writes to file.
+                        console.warn('⚠️ JSON file not found, checking stdout...');
+                        resolve(stdout.trim());
                     }
-                );
-                
-                if (!retryResponse.ok) throw new Error(`HF API error: ${retryResponse.status}`);
-                const retryResult = await retryResponse.json();
-                return retryResult.text || '';
-            }
-            throw new Error(`HF API error: ${response.status}`);
-        }
 
-        const result = await response.json();
-        return result.text || '';
-
-    } catch (error: any) {
-        console.error('❌ Transcription error:', error.message);
-        throw error;
-    }
+                } catch (parseError) {
+                    console.error('❌ Failed to parse transcript:', parseError);
+                    reject(parseError);
+                }
+            });
+        });
+    });
 }
 
 /**

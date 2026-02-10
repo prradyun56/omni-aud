@@ -10,6 +10,7 @@ export interface ILineItem {
 export interface IFinancialDocument extends Document {
     fileName: string;
     fileUrl?: string;
+    enhancedAudioUrl?: string;
     fileType: string;
     uploadedAt: Date;
     status: 'PROCESSING' | 'COMPLETED' | 'FAILED';
@@ -57,6 +58,7 @@ const LineItemSchema = new Schema({
 const FinancialDocumentSchema = new Schema<IFinancialDocument>({
     fileName: { type: String, required: true },
     fileUrl: { type: String },
+    enhancedAudioUrl: { type: String },
     fileType: { type: String, required: true },
     uploadedAt: { type: Date, default: Date.now },
     status: {

@@ -21,6 +21,7 @@ interface DocumentData {
   _id: string;
   fileName: string;
   fileUrl?: string; // Ensure this is populated
+  enhancedAudioUrl?: string;
   status: 'PROCESSING' | 'COMPLETED' | 'FAILED';
   documentType?: string;
   invoiceNumber?: string;
@@ -67,6 +68,10 @@ export default function FinancialReview({ pdfUrl, initialData }: FinancialReview
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [visualizerData, setVisualizerData] = useState<number[]>(new Array(20).fill(10));
+
+  // Audio Source Toggle
+  const [showEnhanced, setShowEnhanced] = useState(false);
+  const audioUrl = showEnhanced && data.enhancedAudioUrl ? data.enhancedAudioUrl : data.fileUrl;
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null); // For auto-scroll
@@ -129,7 +134,7 @@ export default function FinancialReview({ pdfUrl, initialData }: FinancialReview
 
   // Initialize Audio Context and Visualizer
   const togglePlay = async () => {
-    if (!audioRef.current || !data.fileUrl) return;
+    if (!audioRef.current || !audioUrl) return;
 
     if (!audioContextRef.current) {
       // Initialize Web Audio API
@@ -215,7 +220,7 @@ export default function FinancialReview({ pdfUrl, initialData }: FinancialReview
     }
   };
 
-  const handleSendMessage = async (text: string) => {
+const handleSendMessage = async (text: string) => {
     if (!text.trim()) return;
 
     setMessages(prev => [...prev, { role: 'user', text }]);
@@ -233,21 +238,34 @@ export default function FinancialReview({ pdfUrl, initialData }: FinancialReview
         })
       });
 
-      const result = await response.json();
+      // FIX: Read as text first to handle "Timeout" or "HTML" error pages safely
+      const rawText = await response.text();
+      let result;
+
+      try {
+        result = JSON.parse(rawText);
+      } catch (e) {
+        // If JSON.parse fails, the server likely returned an HTML error page (Timeout/500)
+        console.error("Non-JSON response received:", rawText);
+        throw new Error(`Server connection failed (${response.status})`);
+      }
 
       if (!response.ok) {
-        throw new Error(result.error || 'Failed to get response');
+        // Safe access to result.error
+        throw new Error(result.error || 'Failed to get valid response from AI');
       }
 
       setMessages(prev => [...prev, {
         role: 'ai',
         text: result.answer
       }]);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Chat error:', error);
+      
+      // Update the chat with the actual error message so you know what's wrong
       setMessages(prev => [...prev, {
         role: 'ai',
-        text: "Sorry, I encountered an error while analyzing the document. Please try again."
+        text: `Connection Error: ${error.message || "Please check your internet or try again."}`
       }]);
     } finally {
       setIsTyping(false);
@@ -347,10 +365,11 @@ export default function FinancialReview({ pdfUrl, initialData }: FinancialReview
   return (
     <div className="financial-review">
       {/* Hidden Audio Element */}
-      {data.fileUrl && (
+      {audioUrl && (
         <audio
           ref={audioRef}
-          src={data.fileUrl}
+          src={audioUrl}
+          key={audioUrl} // Force re-render when source changes
           onLoadedMetadata={onLoadedMetadata}
           onTimeUpdate={onTimeUpdate}
           onEnded={onEnded}
@@ -385,6 +404,24 @@ export default function FinancialReview({ pdfUrl, initialData }: FinancialReview
             <div className="audio-glow" />
 
             <div className="audio-content">
+              {/* Toggle Switch */}
+              {data.enhancedAudioUrl && (
+                <div className="audio-toggle-container">
+                  <button
+                    className={`toggle-btn ${!showEnhanced ? 'active' : ''}`}
+                    onClick={() => setShowEnhanced(false)}
+                  >
+                    Original
+                  </button>
+                  <button
+                    className={`toggle-btn ${showEnhanced ? 'active' : ''}`}
+                    onClick={() => setShowEnhanced(true)}
+                  >
+                    Enhanced ✨
+                  </button>
+                </div>
+              )}
+
               <div className="audio-player">
                 {/* Audio Icon */}
                 <div className={`audio-icon-circle ${isPlaying ? 'playing' : ''}`}>
@@ -591,6 +628,43 @@ export default function FinancialReview({ pdfUrl, initialData }: FinancialReview
       </div>
 
       <style jsx>{`
+        /* Toggle Switch Styles */
+        .audio-toggle-container {
+            display: flex;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 4px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            width: fit-content;
+            margin-left: auto;
+            margin-right: auto;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .toggle-btn {
+            padding: 8px 24px;
+            border-radius: 8px;
+            border: none;
+            background: transparent;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .toggle-btn.active {
+            background: var(--tangerine);
+            color: #1a1a1a; /* Dark text for contrast */
+            box-shadow: 0 2px 10px rgba(252, 163, 17, 0.3);
+        }
+
+        .toggle-btn:hover:not(.active) {
+            color: white;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
         .financial-review {
           min-height: 100vh;
           background: var(--navy-bg);

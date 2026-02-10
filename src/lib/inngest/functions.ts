@@ -4,7 +4,9 @@ import FinancialDocument from '../../models/FinancialDocument';
 import { extractFinancialData } from '../mastra';
 import { processAudioComplete, cleanupTempFiles, SUPPORTED_LANGUAGES } from '../audio-processor';
 import fs from 'fs';
-import OpenAI from 'openai';
+import path from 'path';
+import { Ollama } from 'ollama'; // Local LLM
+import OpenAI from 'openai'; // Keep OpenAI for legacy textual docs if needed, but we use Ollama for audio
 
 // Background function to process financial documents (PDF/Images)
 export const processFinancialDocument = inngest.createFunction(
@@ -116,132 +118,88 @@ export const processFinancialAudio = inngest.createFunction(
                         throw new Error(`Audio file not found at path: ${filePath}`);
                     }
 
-                    console.log(`🎵 Processing audio file: ${filePath}`);
-                    console.log(`🌐 Language: ${language}`);
+                    console.log(`🎵 Processing audio file locally: ${filePath}`);
 
-                    // Use Hugging Face for transcription (or fallback to Groq)
-                    let transcript = '';
-                    let usedHuggingFace = false;
+                    // Call local pipeline (Convert -> Denoise -> Whisper CLI)
+                    const result = await processAudioComplete(filePath, language);
 
-                    try {
-                        // Try Hugging Face Inference API first (FREE + Indian languages)
-                        const result = await processAudioComplete(filePath, language);
-                        transcript = result.transcript;
-                        tempFiles = result.tempFiles;
-                        usedHuggingFace = true;
-                        console.log('✅ Used Hugging Face Inference API');
-                    } catch (hfError: any) {
-                        console.warn('⚠️ Hugging Face transcription failed, falling back to Groq Whisper');
-                        console.warn('Error:', hfError.message);
-
-                        // Fallback to Groq Whisper (English only, but works without extra credentials)
-                        const apiKey = process.env.GROQ_API_KEY;
-                        if (!apiKey) {
-                            throw new Error('Both Hugging Face and Groq credentials are missing');
-                        }
-
-                        const openai = new OpenAI({
-                            apiKey: apiKey,
-                            baseURL: "https://api.groq.com/openai/v1",
-                            timeout: 120 * 1000,
-                        });
-
-                        // Use original file or converted WAV if available
-                        const audioFile = fs.existsSync(filePath.replace(/\.(m4a|mp3)$/i, '.wav'))
-                            ? filePath.replace(/\.(m4a|mp3)$/i, '.wav')
-                            : filePath;
-
-                        const transcription = await openai.audio.transcriptions.create({
-                            file: fs.createReadStream(audioFile),
-                            model: "whisper-large-v3",
-                            response_format: "json",
-                        });
-
-                        transcript = transcription.text;
-                        usedHuggingFace = false;
-                        console.log('✅ Used Groq Whisper (fallback)');
-                    }
-
-                    if (!transcript || transcript.trim().length === 0) {
+                    if (!result.transcript || result.transcript.trim().length === 0) {
                         throw new Error('Transcription resulted in empty text');
                     }
 
-                    return { transcript, usedHuggingFace };
+                    return {
+                        transcript: result.transcript,
+                        cleanPath: result.cleanPath,
+                        tempFiles: result.tempFiles
+                    };
                 } catch (error: any) {
                     console.error('Audio processing error:', error);
                     throw new Error(`Failed to process audio: ${error.message}`);
                 }
             });
 
-            // Step 2: Analyze transcript with Groq Llama
+            // Step 2: Analyze transcript with Ollama (Local Llama 3.2)
             const analysisData = await step.run('analyze-transcript', async () => {
                 try {
-                    const apiKey = process.env.GROQ_API_KEY;
-                    if (!apiKey) {
-                        throw new Error('GROQ_API_KEY is missing');
-                    }
+                    console.log('🤖 Analyzing transcript with Local Ollama (Anti-Gravity)...');
 
-                    const openai = new OpenAI({
-                        apiKey: apiKey,
-                        baseURL: "https://api.groq.com/openai/v1",
-                    });
+                    const ollama = new Ollama(); // connects to localhost:11434 by default
 
-                    console.log('🤖 Analyzing transcript with Groq Llama...');
+                    const SYSTEM_PROMPT = `
+You are the "Anti-Gravity" Financial Extractor. Your sole purpose is to distill financial truth from noisy transcripts.
 
-                    const prompt = `
-                        You are an expert financial audio analyst. Analyze the following transcript of a financial conversation.
-                        
-                        Transcript:
-                        "${audioResult.transcript}"
+**INPUT CONTEXT:**
+You will receive a transcription of a conversation (originally in Hindi/Indian English). It may contain translation artifacts, informal grammar ("Hinglish"), and irrelevant small talk.
 
-                        Extract the following structured data:
-                        - Sentiment: 'Positive', 'Neutral', or 'Negative'
-                        - Speakers: Identify speakers (e.g., "Agent", "Customer", "Debtor")
-                        - Topics: Key financial topics discussed
-                        - Financial Details: Document type, vendor/client names, amounts, currency, dates
-                        
-                        - **Call Analysis**:
-                            - Intent: What is the main purpose of this call?
-                            - Financial Events: List specific events like promises to pay, disputes, payments made
-                            - Emotional State: Describe the emotional state of the speakers
-                            - Compliance Notes: Note any compliance checks (recording disclosure, warnings)
+**YOUR MISSION:**
+1.  **Filter Gravity:** Eliminate all "heavy" useless data: greetings, weather talk, personal anecdotes, polite filler (e.g., "Namaste", "Chai piyenge?", "How are the kids?").
+2.  **Extract Lift:** Extract ONLY the following financial entities:
+    * **Monetary Values:** Convert all formats (Lakhs, Crores, k, M) into a standardized format (e.g., "₹50 Lakhs").
+    * **Dates/Deadlines:** Specific timeframes mentioned.
+    * **Entities:** Company names, bank names, stakeholders.
+    * **Action Items:** Specific financial commitments or next steps.
 
-                        Return ONLY valid JSON matching this schema:
-                        {
-                            "sentiment": "Positive" | "Neutral" | "Negative",
-                            "speakers": ["string"],
-                            "topics": ["string"],
-                            "documentType": "string (optional)",
-                            "vendorName": "string (optional)",
-                            "clientName": "string (optional)",
-                            "totalAmount": number (optional),
-                            "currency": "string (optional)",
-                            "dueDate": "ISO date string (optional)",
-                            "intent": "string",
-                            "financialEvents": ["string"],
-                            "emotionalState": "string",
-                            "complianceNotes": ["string"]
-                        }
-                    `;
+**OUTPUT FORMAT:**
+Return strictly a JSON object. Do not speak to me. Do not add markdown blocks. Just the raw JSON.
 
-                    const completion = await openai.chat.completions.create({
-                        model: "llama-3.3-70b-versatile",
+{
+  "summary": "A 1-sentence executive summary of the financial topic.",
+  "key_figures": [
+    {"item": "Revenue Target", "value": "₹5 Crores", "context": "Mentioned by Sharma ji for Q3"}
+  ],
+  "dates": ["2024-03-31 (Year End closing)"],
+  "risks": ["Potential delay in RBI approval"],
+  "action_items": ["Submit audit report by Friday"],
+  "sentiment": "Positive/Neutral/Negative",
+  "speakers": ["Speaker 1", "Speaker 2"],
+  "topics": ["Audit", "Payment", "Deadline"]
+}
+`;
+
+                    const response = await ollama.chat({
+                        model: 'llama3.2', // Ensure this model is pulled
                         messages: [
-                            { role: "system", content: "You are a precise JSON extractor." },
-                            { role: "user", content: prompt }
+                            { role: 'system', content: SYSTEM_PROMPT },
+                            { role: 'user', content: `Transcript:\n"${audioResult.transcript}"` }
                         ],
-                        temperature: 0.1,
-                        response_format: { type: "json_object" }
+                        format: 'json', // Enforce JSON mode
+                        stream: false
                     });
 
-                    const responseText = completion.choices[0].message.content || '{}';
-                    const analysis = JSON.parse(responseText);
+                    const responseText = response.message.content;
+                    console.log("Raw Ollama Response:", responseText);
 
+                    const analysis = JSON.parse(responseText);
                     console.log('✅ Analysis complete');
                     return analysis;
+
                 } catch (error: any) {
                     console.error('Analysis error:', error);
-                    throw new Error(`Failed to analyze transcript: ${error.message}`);
+                    // Provide a partial result so we don't fail the whole job
+                    return {
+                        summary: "Analysis failed due to LLM error.",
+                        processingError: error.message
+                    };
                 }
             });
 
@@ -271,6 +229,7 @@ export const processFinancialAudio = inngest.createFunction(
                         emotionalState: analysisData.emotionalState,
                         complianceNotes: analysisData.complianceNotes,
                         processedAt: new Date(),
+                        enhancedAudioUrl: audioResult.cleanPath ? `/uploads/${path.basename(audioResult.cleanPath)}` : undefined,
                     });
 
                     if (!updateResult) {
@@ -294,7 +253,10 @@ export const processFinancialAudio = inngest.createFunction(
             // Step 4: Cleanup temporary files
             await step.run('cleanup', async () => {
                 if (tempFiles.length > 0) {
-                    cleanupTempFiles(tempFiles);
+                    // IMPORTANT: Do NOT delete the 'cleanPath' file as we are now serving it
+                    // Filter out the cleanPath from tempFiles before deleting
+                    const filesToDelete = tempFiles.filter(f => f !== audioResult.cleanPath);
+                    cleanupTempFiles(filesToDelete);
                 }
             });
 
@@ -302,7 +264,6 @@ export const processFinancialAudio = inngest.createFunction(
                 documentId,
                 status: 'completed',
                 transcriptLength: audioResult.transcript.length,
-                usedHuggingFace: audioResult.usedHuggingFace
             };
 
         } catch (error: any) {
