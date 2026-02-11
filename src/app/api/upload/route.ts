@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
 
         if (!allowedTypes.includes(file.type)) {
             return NextResponse.json(
-                { error: 'Invalid file type. Allowed: PDF, PNG, JPG, TXT, DOCX, MP3, WAV' },
+                { error: 'Invalid file type. Allowed: WAV' },
                 { status: 400 }
             );
         }

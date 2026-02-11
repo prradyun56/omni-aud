@@ -220,7 +220,7 @@ export default function FinancialReview({ pdfUrl, initialData }: FinancialReview
     }
   };
 
-const handleSendMessage = async (text: string) => {
+  const handleSendMessage = async (text: string) => {
     if (!text.trim()) return;
 
     setMessages(prev => [...prev, { role: 'user', text }]);
@@ -261,7 +261,7 @@ const handleSendMessage = async (text: string) => {
       }]);
     } catch (error: any) {
       console.error('Chat error:', error);
-      
+
       // Update the chat with the actual error message so you know what's wrong
       setMessages(prev => [...prev, {
         role: 'ai',
@@ -486,12 +486,13 @@ const handleSendMessage = async (text: string) => {
         <div className="info-section">
           <div className="scrollable-content">
             {/* Call Analysis Card (Commented out to match design) */}
-            {/* <CallAnalysisCard
+            {/* Call Analysis Card */}
+            <CallAnalysisCard
               intent={data.intent}
               financialEvents={data.financialEvents}
               emotionalState={data.emotionalState}
               complianceNotes={data.complianceNotes}
-            /> */}
+            />
 
             {/* Metadata Card */}
             <div className="info-card">

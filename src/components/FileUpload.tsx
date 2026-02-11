@@ -112,7 +112,7 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
           <p className="dropzone-description">
             {uploadStatus === 'error'
               ? errorMessage
-              : "Drag & drop MP3, MP4, or WAV files. We'll handle the rest."
+              : "Drag & drop a WAV file. We'll handle the rest."
             }
           </p>
 

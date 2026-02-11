@@ -172,7 +172,11 @@ Return strictly a JSON object. Do not speak to me. Do not add markdown blocks. J
   "action_items": ["Submit audit report by Friday"],
   "sentiment": "Positive/Neutral/Negative",
   "speakers": ["Speaker 1", "Speaker 2"],
-  "topics": ["Audit", "Payment", "Deadline"]
+  "topics": ["Audit", "Payment", "Deadline"],
+  "intent": "Primary reason for the call (e.g., Payment Arrangement, Dispute, Inquiry)",
+  "financialEvents": ["Promised to pay ₹5000", "Disputed late fee"],
+  "emotionalState": "Description of the speakers' emotions (e.g., Customer is stressed but cooperative)",
+  "complianceNotes": ["Recording disclosure mentioned", "Mini-Miranda warning given"]
 }
 `;
 
