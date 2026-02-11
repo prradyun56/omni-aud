@@ -107,6 +107,60 @@ ollama serve
 
 ## ⚠️ Common Issues
 
+<<<<<<< HEAD
 *   **"Ollama connection refused"**: Make sure `ollama serve` is running.
 *   **"FFmpeg not found"**: Ensure `ffmpeg` is in your system's PATH environment variable. Restart terminals after installing.
 *   **"Inngest event not triggering"**: Ensure the Inngest dev server (Terminal 1) is running AND connected to `http://localhost:3000/api/inngest`.
+=======
+### Future File Storage
+Replace local disk storage with cloud storage:
+- AWS S3
+- Cloudflare R2
+- UploadThing
+- Vercel Blob
+
+### Environment Variables
+Update `.env.local` with production values:
+- Real MongoDB cluster URI
+- Production Inngest keys from https://app.inngest.com
+- Production OpenAI API key with billing enabled
+
+### Deploy to Vercel
+```bash
+vercel deploy
+```
+
+## Challenge Extensions
+
+### Audio Processing (Challenge 1)
+The system includes a placeholder for audio processing. To implement:
+
+1. Use the `processFinancialAudio` function in `lib/inngest/functions.ts`
+2. Add Whisper API for transcription
+3. Modify Mastra prompts to extract speakers and sentiment
+4. Update schema to store audio-specific data
+
+### Advanced Features
+- Batch processing
+- Discrepancy detection
+- Email notifications (Future)
+- Webhook integrations
+
+## Troubleshooting
+
+**Issue**: MongoDB connection fails
+- Check your `MONGODB_URI` in `.env.local`
+- Ensure MongoDB cluster allows connections from your IP
+
+**Issue**: Inngest jobs not running
+- Make sure `npx inngest-cli@latest dev` is running
+- Check Inngest dashboard at http://localhost:8288
+
+**Issue**: AI extraction fails
+- Verify `OPENAI_API_KEY` is valid
+- Check OpenAI API quota and billing
+
+## License
+
+MIT
+>>>>>>> acab201f8a529d097ffff6e635924a7639b3b371
