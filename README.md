@@ -103,7 +103,7 @@ This opens the Inngest dashboard at http://localhost:8288 to monitor background 
 
 ## Production Deployment
 
-### File Storage
+### Future File Storage
 Replace local disk storage with cloud storage:
 - AWS S3
 - Cloudflare R2
@@ -132,11 +132,9 @@ The system includes a placeholder for audio processing. To implement:
 4. Update schema to store audio-specific data
 
 ### Advanced Features
-- Multiple file upload
 - Batch processing
-- Export to Excel/CSV
 - Discrepancy detection
-- Email notifications
+- Email notifications (Future)
 - Webhook integrations
 
 ## Troubleshooting
