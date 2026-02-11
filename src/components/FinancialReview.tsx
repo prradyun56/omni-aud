@@ -518,39 +518,7 @@ export default function FinancialReview({ pdfUrl, initialData }: FinancialReview
             </div>
 
             {/* Parties & Summary Card */}
-            <div className="summary-card">
-              <div className="parties-grid">
-                <div className="party-info">
-                  <div className="party-label">
-                    <User size={16} />
-                    <span>VENDOR</span>
-                  </div>
-                  <p className="party-name">{data.vendorName || '-'}</p>
-                  {vendorLocation && <p className="party-location">{vendorLocation}</p>}
-                </div>
-                <div className="party-info">
-                  <div className="party-label">
-                    <DollarSign size={16} />
-                    <span>TOTAL</span>
-                  </div>
-                  <p className="total-amount">
-                    {totalAmount > 0 ? `${currencySymbol}${totalAmount.toFixed(2)}` : 'No money mentioned'}
-                  </p>
-                  <p className="currency">{data.currency?.toUpperCase() || '-'}</p>
-                </div>
-              </div>
 
-              <div className="payment-summary">
-                <div className="payment-row">
-                  <span>Paid So Far</span>
-                  <span className="paid-amount">{currencySymbol}{paidAmount.toFixed(2)}</span>
-                </div>
-                <div className="payment-row total">
-                  <span>Remaining Due</span>
-                  <span className="remaining-amount">{currencySymbol}{remaining.toFixed(2)}</span>
-                </div>
-              </div>
-            </div>
 
             {/* AI Assistant Chat Card */}
             <div className="chat-card-container">
