@@ -118,7 +118,7 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
 
           {!isUploading && uploadStatus === 'idle' && (
             <div className="format-badges">
-              {['MP3', 'MP4', 'WAV'].map((format) => (
+              {['WAV'].map((format) => (
                 <span key={format} className="format-badge">
                   {format}
                 </span>

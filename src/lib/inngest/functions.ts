@@ -146,37 +146,39 @@ export const processFinancialAudio = inngest.createFunction(
                     const ollama = new Ollama(); // connects to localhost:11434 by default
 
                     const SYSTEM_PROMPT = `
-You are the "Anti-Gravity" Financial Extractor. Your sole purpose is to distill financial truth from noisy transcripts.
+You are a highly intelligent financial analyst AI. Your task is to extract structured financial data from a conversation transcript.
 
-**INPUT CONTEXT:**
-You will receive a transcription of a conversation (originally in Hindi/Indian English). It may contain translation artifacts, informal grammar ("Hinglish"), and irrelevant small talk.
+**STRICT OUTPUT RULES:**
+1.  **Output ONLY valid JSON.**
+2.  Do NOT include markdown formatting (like \`\`\`json ... \`\`\`).
+3.  Do NOT include any introductory or concluding text.
+4.  If a field is not mentioned, use null or an empty array [].
+5.  **Sentiment** must be one of: "Positive", "Neutral", "Negative".
 
-**YOUR MISSION:**
-1.  **Filter Gravity:** Eliminate all "heavy" useless data: greetings, weather talk, personal anecdotes, polite filler (e.g., "Namaste", "Chai piyenge?", "How are the kids?").
-2.  **Extract Lift:** Extract ONLY the following financial entities:
-    * **Monetary Values:** Convert all formats (Lakhs, Crores, k, M) into a standardized format (e.g., "₹50 Lakhs").
-    * **Dates/Deadlines:** Specific timeframes mentioned.
-    * **Entities:** Company names, bank names, stakeholders.
-    * **Action Items:** Specific financial commitments or next steps.
+**DATA SCHEMAS:**
+- **Money:** formatted as string (e.g., "₹5 Lakhs", "$500").
+- **Date:** formatted as YYYY-MM-DD if possible, else original text.
 
-**OUTPUT FORMAT:**
-Return strictly a JSON object. Do not speak to me. Do not add markdown blocks. Just the raw JSON.
-
+**REQUIRED JSON STRUCTURE:**
 {
-  "summary": "A 1-sentence executive summary of the financial topic.",
-  "key_figures": [
-    {"item": "Revenue Target", "value": "₹5 Crores", "context": "Mentioned by Sharma ji for Q3"}
-  ],
-  "dates": ["2024-03-31 (Year End closing)"],
-  "risks": ["Potential delay in RBI approval"],
-  "action_items": ["Submit audit report by Friday"],
-  "sentiment": "Positive/Neutral/Negative",
-  "speakers": ["Speaker 1", "Speaker 2"],
-  "topics": ["Audit", "Payment", "Deadline"],
-  "intent": "Primary reason for the call (e.g., Payment Arrangement, Dispute, Inquiry)",
-  "financialEvents": ["Promised to pay ₹5000", "Disputed late fee"],
-  "emotionalState": "Description of the speakers' emotions (e.g., Customer is stressed but cooperative)",
-  "complianceNotes": ["Recording disclosure mentioned", "Mini-Miranda warning given"]
+  "summary": "1-2 sentence summary of the financial discussion.",
+  "key_figures": [{"item": "Description", "value": "Amount/Value", "context": "Context"}],
+  "dates": ["YYYY-MM-DD", "Deadline description"],
+  "risks": ["Risk 1", "Risk 2"],
+  "action_items": ["Action 1", "Action 2"],
+  "sentiment": "Neutral",
+  "speakers": ["Name 1", "Name 2"],
+  "topics": ["Topic 1", "Topic 2"],
+  "intent": "Primary purpose of call",
+  "financialEvents": ["Event description"],
+  "emotionalState": "Calm/Angry/Confused",
+  "complianceNotes": ["Note 1"],
+  "documentType": "Audio Call",
+  "vendorName": null,
+  "clientName": null,
+  "totalAmount": null,
+  "currency": "USD",
+  "dueDate": null
 }
 `;
 
@@ -184,7 +186,7 @@ Return strictly a JSON object. Do not speak to me. Do not add markdown blocks. J
                         model: 'llama3.2', // Ensure this model is pulled
                         messages: [
                             { role: 'system', content: SYSTEM_PROMPT },
-                            { role: 'user', content: `Transcript:\n"${audioResult.transcript}"` }
+                            { role: 'user', content: `Analyze the following transcript:\n\n"${audioResult.transcript}"` }
                         ],
                         format: 'json', // Enforce JSON mode
                         stream: false
@@ -193,7 +195,23 @@ Return strictly a JSON object. Do not speak to me. Do not add markdown blocks. J
                     const responseText = response.message.content;
                     console.log("Raw Ollama Response:", responseText);
 
-                    const analysis = JSON.parse(responseText);
+                    // Robust JSON Parsing
+                    let analysis;
+                    try {
+                        // 1. Try direct parse
+                        analysis = JSON.parse(responseText);
+                    } catch (e) {
+                        console.warn("⚠️ Direct JSON parse failed. Attempting cleanup...");
+                        // 2. Try stripping markdown code blocks
+                        const cleanText = responseText.replace(/```json\n|\n```|```/g, '').trim();
+                        try {
+                            analysis = JSON.parse(cleanText);
+                        } catch (e2) {
+                            console.error("❌ Failed to parse JSON even after cleanup.", e2);
+                            throw new Error("Invalid JSON extraction from LLM.");
+                        }
+                    }
+
                     console.log('✅ Analysis complete');
                     return analysis;
 
@@ -201,25 +219,87 @@ Return strictly a JSON object. Do not speak to me. Do not add markdown blocks. J
                     console.error('Analysis error:', error);
                     // Provide a partial result so we don't fail the whole job
                     return {
-                        summary: "Analysis failed due to LLM error.",
-                        processingError: error.message
+                        summary: "Analysis failed due to LLM error. Please review the transcript manually.",
+                        processingError: error.message,
+                        // Return empty defaults to avoid DB update failures
+                        sentiment: "Neutral",
+                        speakers: [],
+                        topics: [],
+                        financialEvents: [],
+                        complianceNotes: []
                     };
                 }
             });
 
             // Step 3: Update database
             await step.run('update-database', async () => {
+                console.log('🔄 Connecting to database for update...');
                 await connectToDatabase();
+                console.log('✅ Database connected.');
 
                 try {
-                    const updateResult = await FinancialDocument.findByIdAndUpdate(documentId, {
+                    console.log('📄 Updating document:', documentId);
+
+                    // Normalize sentiment to match Schema Enum
+                    let sentiment = analysisData.sentiment;
+                    const validSentiments = ['Positive', 'Neutral', 'Negative'];
+
+                    if (sentiment && typeof sentiment === 'string' && sentiment.trim().length > 0) {
+                        // Capitalize first letter, lowercase rest
+                        sentiment = sentiment.charAt(0).toUpperCase() + sentiment.slice(1).toLowerCase();
+                        if (!validSentiments.includes(sentiment)) {
+                            console.warn(`⚠️ Invalid sentiment "${analysisData.sentiment}" received. Defaulting to Neutral.`);
+                            sentiment = 'Neutral';
+                        }
+                    } else {
+                        // Default to Neutral if missing or empty string to avoid Validation Error
+                        sentiment = 'Neutral';
+                    }
+
+                    // Helper to normalize array fields (handle strings, arrays of objects, etc.)
+                    const normalizeStringArray = (input: any): string[] => {
+                        if (!input) return [];
+
+                        let arr = input;
+                        // specific handling if it's a string looking like an array
+                        if (typeof input === 'string') {
+                            try {
+                                const parsed = JSON.parse(input);
+                                if (Array.isArray(parsed)) arr = parsed;
+                                else return [input];
+                            } catch (e) {
+                                return [input];
+                            }
+                        }
+
+                        if (!Array.isArray(arr)) {
+                            return [String(arr)];
+                        }
+
+                        return arr.map((item: any) => {
+                            if (typeof item === 'string') return item;
+                            if (typeof item === 'object' && item !== null) {
+                                // Extract common fields if present, else stringify
+                                const distinctValues = [item.description, item.amount, item.value, item.item, item.risk, item.action]
+                                    .filter(v => v && typeof v === 'string' || typeof v === 'number');
+
+                                if (distinctValues.length > 0) {
+                                    return distinctValues.join(': ');
+                                }
+                                return JSON.stringify(item);
+                            }
+                            return String(item);
+                        });
+                    };
+
+                    const updateData = {
                         status: 'COMPLETED',
                         // Store transcript
                         transcript: audioResult.transcript,
                         // Store audio analysis
-                        sentiment: analysisData.sentiment,
-                        speakers: analysisData.speakers,
-                        topics: analysisData.topics,
+                        sentiment: sentiment,
+                        speakers: normalizeStringArray(analysisData.speakers),
+                        topics: normalizeStringArray(analysisData.topics),
                         // Store financial data
                         documentType: analysisData.documentType || 'Audio Call',
                         vendorName: analysisData.vendorName,
@@ -228,28 +308,40 @@ Return strictly a JSON object. Do not speak to me. Do not add markdown blocks. J
                         currency: analysisData.currency || 'USD',
                         dueDate: analysisData.dueDate,
                         // Store call analysis
-                        intent: analysisData.intent,
-                        financialEvents: analysisData.financialEvents,
+                        intent: typeof analysisData.intent === 'string' ? analysisData.intent : JSON.stringify(analysisData.intent),
+                        financialEvents: normalizeStringArray(analysisData.financialEvents),
                         emotionalState: analysisData.emotionalState,
-                        complianceNotes: analysisData.complianceNotes,
+                        complianceNotes: normalizeStringArray(analysisData.complianceNotes),
                         processedAt: new Date(),
                         enhancedAudioUrl: audioResult.cleanPath ? `/uploads/${path.basename(audioResult.cleanPath)}` : undefined,
-                    });
+                    };
+
+                    console.log('📝 Update payload:', JSON.stringify(updateData, null, 2));
+
+                    const updateResult = await FinancialDocument.findByIdAndUpdate(documentId, updateData, { new: true, runValidators: true });
 
                     if (!updateResult) {
-                        throw new Error(`Document with ID ${documentId} not found`);
+                        throw new Error(`Document with ID ${documentId} not found during update`);
                     }
 
-                    console.log('✅ Database updated successfully');
+                    console.log('✅ Database updated successfully:', updateResult._id);
+                    return { success: true, id: updateResult._id };
                 } catch (error: any) {
-                    console.error('Error updating database (Audio):', error);
+                    console.error('❌ Error updating database (Audio):', error);
+                    console.error('Stack:', error.stack);
 
                     // Mark document as failed
-                    await FinancialDocument.findByIdAndUpdate(documentId, {
-                        status: 'FAILED',
-                        processingError: error instanceof Error ? error.message : 'Unknown error',
-                        processedAt: new Date(),
-                    });
+                    try {
+                        await FinancialDocument.findByIdAndUpdate(documentId, {
+                            status: 'FAILED',
+                            processingError: error instanceof Error ? error.message : 'Unknown error during DB update',
+                            processedAt: new Date(),
+                        });
+                        console.log('⚠️ Document marked as FAILED in DB.');
+                    } catch (markError) {
+                        console.error('🔥 CRITICAL: Failed to mark document as FAILED:', markError);
+                    }
+
                     throw error;
                 }
             });
