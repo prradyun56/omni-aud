@@ -1,0 +1,13 @@
+{
+    "status": "ENCRYPTED_AT_REST",
+    "timestamp": "Wed Feb 11 11:27:30 2026",
+    "source": "debt_collection_call.wav",
+    "vault": {
+        "[MONEY_1]": "-32,500 rupees",
+        "[MONEY_2]": "5,000 rupees",
+        "[MONEY_3]": "-2,000 rupees",
+        "[DATE_1]": "January 10",
+        "[DETAIL_1]": "7,832",
+        "[ORG_1]": "ABC Finance"
+    }
+}
